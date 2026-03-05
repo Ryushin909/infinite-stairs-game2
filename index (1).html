@@ -1,0 +1,835 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>無限階段ゲーム（HTML）</title>
+  <style>
+    :root{
+      --bg1:#0b1020; --panel:rgba(10,18,35,.72); --text:#eaf0ff; --muted:#a9b6d6;
+      --accent:#7aa2ff; --danger:#ff5c7a; --step:#2a3a62; --step2:#243557; --edge:rgba(255,255,255,.12);
+      --barBg: rgba(255,255,255,.10);
+      --barOk: rgba(122,162,255,.70);
+      --barWarn: rgba(255,210,90,.75);
+      --barBad: rgba(255,92,122,.80);
+    }
+    html,body{
+      height:100%; margin:0; overflow:hidden;
+      background:radial-gradient(1200px 900px at 70% 15%, #13234a 0%, var(--bg1) 55%, #050812 100%);
+      color:var(--text);
+      font-family: ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,"Hiragino Kaku Gothic ProN","Noto Sans JP","Yu Gothic",Meiryo,sans-serif;
+    }
+    #wrap{position:relative;height:100%;width:100%}
+    canvas{display:block;width:100%;height:100%}
+
+    /* ===== 中央下 HUD ===== */
+    .hud{
+      position:absolute;
+      left:50%;
+      bottom:104px;
+      transform:translateX(-50%);
+      padding:12px 14px;
+      background:var(--panel);
+      border:1px solid rgba(255,255,255,.10);
+      border-radius:14px;
+      backdrop-filter:blur(8px);
+      box-shadow:0 10px 30px rgba(0,0,0,.25);
+      width:min(720px, calc(100vw - 24px));
+      pointer-events:none;
+    }
+    .hud .title{
+      font-weight:900; letter-spacing:.02em; font-size:13px; color:#dfe8ff;
+      display:flex; justify-content:space-between; gap:10px; flex-wrap:wrap;
+      margin-bottom:6px;
+    }
+    .row{
+      display:flex; gap:14px; flex-wrap:wrap;
+      font-size:13px; color:var(--muted); line-height:1.4
+    }
+    .kbd{
+      display:inline-block; padding:1px 8px; border-radius:8px;
+      border:1px solid rgba(255,255,255,.18);
+      background:rgba(255,255,255,.06);
+      color:#f4f7ff; font-weight:900; font-size:12px;
+      transform:translateY(-1px)
+    }
+    .timerWrap{margin-top:10px}
+    .timerTop{
+      display:flex; justify-content:space-between; align-items:center;
+      font-size:12px; color:rgba(233,240,255,.85); margin-bottom:0px
+    }
+    .note{
+      margin-top:8px;
+      font-size:12px;
+      color:rgba(233,240,255,.72);
+      line-height:1.5;
+    }
+
+    /* ===== オーバーレイ（スタート/ゲームオーバー） ===== */
+    .overlay{
+      position:absolute; inset:0;
+      display:none; align-items:center; justify-content:center;
+      background:rgba(4,6,12,.60);
+      backdrop-filter:blur(8px);
+      z-index:10;
+    }
+    .overlay.show{display:flex}
+    .card{
+      width:min(620px, calc(100vw - 28px));
+      background:rgba(10,18,35,.86);
+      border:1px solid rgba(255,255,255,.12);
+      border-radius:18px;
+      padding:18px 18px 16px;
+      box-shadow:0 18px 60px rgba(0,0,0,.45);
+    }
+    .card h1{margin:0 0 8px;font-size:24px;letter-spacing:.03em}
+    .card p{margin:0 0 12px;color:var(--muted);line-height:1.6;font-size:14px}
+    .btns{display:flex;gap:10px;flex-wrap:wrap;margin-top:10px}
+    button{
+      appearance:none;
+      border:1px solid rgba(255,255,255,.14);
+      background:rgba(255,255,255,.08);
+      color:var(--text);
+      padding:10px 12px;
+      border-radius:12px;
+      cursor:pointer;
+      font-weight:900;
+      letter-spacing:.02em;
+      pointer-events:auto;
+    }
+    button.primary{
+      background:linear-gradient(180deg, rgba(122,162,255,.28), rgba(122,162,255,.14));
+      border-color:rgba(122,162,255,.40);
+    }
+    button.danger{
+      background:linear-gradient(180deg, rgba(255,92,122,.26), rgba(255,92,122,.12));
+      border-color:rgba(255,92,122,.40);
+    }
+    button:active{transform:translateY(1px)}
+
+    /* モバイル用ボタン（HUDと干渉しにくいように左右下へ） */
+    .mobile{
+      position:absolute;
+      left:16px;
+      bottom:16px;
+      display:flex;
+      gap:10px;
+      user-select:none;
+      -webkit-user-select:none;
+      touch-action:manipulation;
+      z-index:5;
+    }
+    .mobile.right{
+      left:auto;
+      right:16px;
+    }
+    .mobile button{
+      width:88px;height:72px;border-radius:14px;font-size:20px;
+      pointer-events:auto;
+    }
+  </style>
+</head>
+<body>
+<div id="wrap">
+  <canvas id="c"></canvas>
+
+  <!-- 中央下HUD -->
+  <div class="hud" id="hud">
+    <div class="title">
+      <div>無限階段ゲーム</div>
+      <div style="color:rgba(233,240,255,.75); font-weight:800; font-size:12px;">登る: A/D または ←/→（連打）　リトライ: R</div>
+    </div>
+
+    <div class="row">
+      <div>スコア（段数）：<b id="scoreSteps">0</b></div>
+      <div>HI：<b id="hiSteps">0</b></div>
+      <div>入力：<span class="kbd">A</span> / <span class="kbd">←</span>（左上） / <span class="kbd">D</span> / <span class="kbd">→</span>（右上）</div>
+    </div>
+
+    <!-- ゲージはプレイヤーの下に表示するため、HUDには数値のみ残す -->
+    <div class="timerWrap">
+      <div class="timerTop">
+        <div>次の段までの制限時間（止まるとアウト）</div>
+        <div><span id="timeLeft">0.00</span>s / <span id="timeLimit">0.00</span>s</div>
+      </div>
+    </div>
+
+    <div class="note">
+      方向が切り替わる地点で逆方向に踏み出すと踏み外し。登るほど制限時間は短くなります。
+    </div>
+  </div>
+
+  <!-- スタート画面 -->
+  <div class="overlay show" id="startOverlay">
+    <div class="card">
+      <h1>START</h1>
+      <p>
+        <b>A</b> / <b>D</b> または <b>←</b> / <b>→</b> を押して階段を登ります（長押し不可・連打が必要）。<br>
+        1段ごとに制限時間があり、間に合わないとゲームオーバーです。
+      </p>
+      <p style="margin-top:-4px;">
+        ルール：次の段の方向と違うキーで進もうとすると踏み外して落下します。
+      </p>
+      <div class="btns">
+        <button class="primary" id="startBtn">スタート</button>
+        <button id="resetHiBtn" class="danger">ハイスコアリセット</button>
+      </div>
+      <p style="margin-top:10px; font-size:12px; color:rgba(233,240,255,.72);">
+        ※スタート後は止まっていると時間切れになります。
+      </p>
+    </div>
+  </div>
+
+  <!-- ゲームオーバー画面 -->
+  <div class="overlay" id="gameOverOverlay">
+    <div class="card">
+      <h1 style="color:var(--danger);">GAME OVER</h1>
+      <p id="goText">ゲームオーバー。</p>
+      <p>スコア（段数）：<b id="finalSteps">0</b>　/　HI：<b id="finalHi">0</b></p>
+      <div class="btns">
+        <button class="primary" id="retryBtn">リトライ（R）</button>
+        <button id="backBtn">戻る（スタート画面へ）</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- モバイル簡易ボタン（左A / 右D） -->
+  <div class="mobile" aria-label="mobile controls left">
+    <button id="btnA" title="左">左</button>
+  </div>
+  <div class="mobile right" aria-label="mobile controls right">
+    <button id="btnD" title="右" class="primary">右</button>
+  </div>
+</div>
+
+<script>
+(() => {
+  // ==========
+  // 調整パラメータ
+  // ==========
+  const CFG = {
+    // 階段形状
+    stepW: 92,
+    stepH: 26,
+    dx: 62,
+    dy: 38,
+
+    // 生成
+    spawnAheadY: 1100,
+    cleanupBelowY: 900,
+    initialSteps: 90,
+
+    // 左上「寄り道」
+    leftRunChance: 0.16,
+    leftRunMin: 3,
+    leftRunMax: 9,
+
+    // 連続同方向の最大段数（左右共通）
+    maxConsecutiveDir: 10,
+
+    // 段移動アニメ
+    moveTweenMs: 95,
+
+    // 落下演出
+    fallGravity: 2600,
+    fallKickX: 420,
+    fallKickY: -220,
+
+    // カメラ
+    camSmooth: 0.10,
+    camOffsetY: -140,
+
+    // ===== 時間制限（段ごと） =====
+    stepTimeBaseMs: 1400,
+    stepTimeMinMs: 320,
+    stepTimeDecayPerStepMs: 9,
+
+    // ハイスコア保存（段数）
+    hiKey: "infinite_stairs_highscore_steps"
+  };
+
+  // ==========
+  // Canvas
+  // ==========
+  const canvas = document.getElementById("c");
+  const ctx = canvas.getContext("2d");
+  function resize() {
+    const dpr = Math.max(1, Math.min(2, window.devicePixelRatio || 1));
+    canvas.width  = Math.floor(innerWidth * dpr);
+    canvas.height = Math.floor(innerHeight * dpr);
+    canvas.style.width = innerWidth + "px";
+    canvas.style.height = innerHeight + "px";
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }
+  addEventListener("resize", resize, { passive:true });
+  resize();
+
+  // ==========
+  // UI
+  // ==========
+  const startOverlay = document.getElementById("startOverlay");
+  const gameOverOverlay = document.getElementById("gameOverOverlay");
+
+  const startBtn = document.getElementById("startBtn");
+  const resetHiBtn = document.getElementById("resetHiBtn");
+
+  const retryBtn = document.getElementById("retryBtn");
+  const backBtn = document.getElementById("backBtn");
+
+  const goText = document.getElementById("goText");
+  const finalSteps = document.getElementById("finalSteps");
+  const finalHi = document.getElementById("finalHi");
+
+  const scoreStepsEl = document.getElementById("scoreSteps");
+  const hiStepsEl = document.getElementById("hiSteps");
+
+  const timeLeftEl = document.getElementById("timeLeft");
+  const timeLimitEl = document.getElementById("timeLimit");
+
+  function css(name){ return getComputedStyle(document.documentElement).getPropertyValue(name).trim(); }
+
+  // ==========
+  // ゲーム状態
+  // ==========
+  const Mode = { MENU:"menu", PLAY:"play", OVER:"over" };
+  let mode = Mode.MENU;
+
+  let lastKey = null;
+  let camera = { x:0, y:0 };
+
+  // 階段
+  let steps = [];
+  let nextPos = { x:0, y:0 };
+  let currentDir = +1;
+  let leftRunRemain = 0;
+
+  // 連続方向カウント（左右とも最大10段に制限）
+  let lastDirForStreak = +1; // +1=右, -1=左
+  let dirStreak = 0;
+
+  // プレイヤー
+  let player = {
+    idx: 0,
+    x: 0,
+    y: 0,
+    moving: false,
+    t0: 0,
+    fromX: 0, fromY: 0,
+    toX: 0, toY: 0,
+    falling: false,
+    vx: 0, vy: 0
+  };
+
+  // ===== スコア（累計の段数） =====
+  let stepsClimbed = 0;
+  let hiSteps = 0;
+
+  function loadHi() {
+    const v = Number(localStorage.getItem(CFG.hiKey) || "0");
+    hiSteps = Number.isFinite(v) ? Math.max(0, Math.floor(v)) : 0;
+    hiStepsEl.textContent = hiSteps;
+  }
+  function saveHiIfNeeded() {
+    if (stepsClimbed > hiSteps) {
+      hiSteps = stepsClimbed;
+      localStorage.setItem(CFG.hiKey, String(hiSteps));
+      hiStepsEl.textContent = hiSteps;
+    }
+  }
+
+  // ===== 時間制限 =====
+  let stepTimeLimitMs = 0;
+  let stepTimeLeftMs = 0;
+  let stepTimeRatio = 1; // 0..1（描画用）
+
+  function calcTimeLimitMs(climbed) {
+    const t = CFG.stepTimeBaseMs - climbed * CFG.stepTimeDecayPerStepMs;
+    return Math.max(CFG.stepTimeMinMs, t);
+  }
+  function resetStepTimer() {
+    stepTimeLimitMs = calcTimeLimitMs(stepsClimbed);
+    stepTimeLeftMs = stepTimeLimitMs;
+    timeLimitEl.textContent = (stepTimeLimitMs/1000).toFixed(2);
+  }
+  function updateTimerUI() {
+    const ratio = stepTimeLimitMs > 0 ? Math.max(0, Math.min(1, stepTimeLeftMs / stepTimeLimitMs)) : 0;
+    stepTimeRatio = ratio;
+    timeLeftEl.textContent = (stepTimeLeftMs/1000).toFixed(2);
+  }
+
+  // ==========
+  // 階段生成
+  // ==========
+  function randInt(min,max){ return Math.floor(Math.random()*(max-min+1))+min; }
+  function spawnStep(x,y){
+    steps.push({ x,y,w:CFG.stepW,h:CFG.stepH, alt:(steps.length%2===0) });
+  }
+
+  function decideDir() {
+    // まずは従来の「基本右、たまに左寄り道」を決める
+    let dir = +1;
+
+    if (leftRunRemain > 0) {
+      dir = -1;
+      leftRunRemain--;
+    } else {
+      dir = +1;
+      if (Math.random() < CFG.leftRunChance) {
+        const maxL = Math.min(CFG.leftRunMax, CFG.maxConsecutiveDir);
+        leftRunRemain = randInt(CFG.leftRunMin, maxL);
+        dir = -1;
+        leftRunRemain--;
+      }
+    }
+
+    // ---- ここからが「左右とも最大10段」制限 ----
+    if (dir === lastDirForStreak && dirStreak >= CFG.maxConsecutiveDir) {
+      dir = -dir;
+
+      // 強制的に右へ戻す場合、左寄り道残りは打ち消し
+      if (dir === +1) {
+        leftRunRemain = 0;
+      } else {
+        // 強制左の時、寄り道感を少し残す（短め）
+        if (leftRunRemain === 0) {
+          const maxL = Math.min(CFG.leftRunMax, CFG.maxConsecutiveDir);
+          leftRunRemain = Math.max(0, randInt(CFG.leftRunMin, maxL) - 1);
+        }
+      }
+
+      lastDirForStreak = dir;
+      dirStreak = 1;
+    } else {
+      if (dir === lastDirForStreak) dirStreak++;
+      else { lastDirForStreak = dir; dirStreak = 1; }
+    }
+
+    currentDir = dir;
+    return dir;
+  }
+
+  function ensureStepsAhead(){
+    const targetY = player.y + CFG.spawnAheadY;
+    while (nextPos.y < targetY) {
+      spawnStep(nextPos.x, nextPos.y);
+      const dir = decideDir();
+      nextPos = { x: nextPos.x + CFG.dx*dir, y: nextPos.y + CFG.dy };
+    }
+  }
+  function cleanupSteps(){
+    const minY = player.y - CFG.cleanupBelowY;
+    while (steps.length > 12 && steps[0].y < minY) {
+      steps.shift();
+      player.idx = Math.max(0, player.idx - 1);
+    }
+  }
+
+  // ==========
+  // ルール
+  // ==========
+  function expectedDirForNextStep(){
+    const cur = steps[player.idx];
+    const nxt = steps[player.idx + 1];
+    if (!cur || !nxt) return null;
+    return (nxt.x - cur.x) >= 0 ? +1 : -1;
+  }
+
+  function attemptClimb(dirKey){
+    if (mode !== Mode.PLAY) return;
+    if (player.moving || player.falling) return;
+
+    ensureStepsAhead();
+    const cur = steps[player.idx];
+    const nxt = steps[player.idx + 1];
+    if (!cur || !nxt) return;
+
+    const expect = expectedDirForNextStep(); // +1 or -1
+    const want = (dirKey === "D") ? +1 : -1;
+
+    if (want !== expect) {
+      triggerGameOver(`方向切替で踏み外し（次の段は ${expect === +1 ? "右上：D / →" : "左上：A / ←"}）`);
+      return;
+    }
+
+    // 正しいなら次段へ
+    player.moving = true;
+    player.t0 = performance.now();
+    player.fromX = player.x; player.fromY = player.y;
+
+    player.idx += 1;
+    const s = steps[player.idx];
+    player.toX = s.x + CFG.stepW*0.5;
+    player.toY = s.y + CFG.stepH + 20;
+
+    // スコア更新
+    stepsClimbed += 1;
+    scoreStepsEl.textContent = stepsClimbed;
+    saveHiIfNeeded();
+
+    // 次の段までのタイマーリセット
+    resetStepTimer();
+  }
+
+  function triggerGameOver(reason){
+    mode = Mode.OVER;
+
+    player.moving = false;
+    player.falling = true;
+    player.vx = (lastKey === "A") ? -CFG.fallKickX : CFG.fallKickX;
+    player.vy = CFG.fallKickY;
+
+    saveHiIfNeeded();
+
+    goText.textContent = reason;
+    finalSteps.textContent = stepsClimbed;
+    finalHi.textContent = hiSteps;
+
+    gameOverOverlay.classList.add("show");
+  }
+
+  // ==========
+  // スタート/戻る/リトライ
+  // ==========
+  function resetWorldForPlay() {
+    steps = [];
+    nextPos = { x:0, y:0 };
+    currentDir = +1;
+    leftRunRemain = 0;
+
+    lastDirForStreak = +1;
+    dirStreak = 0;
+
+    for (let i=0;i<CFG.initialSteps;i++){
+      spawnStep(nextPos.x, nextPos.y);
+      const dir = decideDir();
+      nextPos = { x: nextPos.x + CFG.dx*dir, y: nextPos.y + CFG.dy };
+    }
+
+    player.idx = 0;
+    player.x = steps[0].x + CFG.stepW*0.5;
+    player.y = steps[0].y + CFG.stepH + 20;
+
+    player.moving = false;
+    player.falling = false;
+    player.vx = 0; player.vy = 0;
+
+    camera.x = player.x;
+    camera.y = player.y + CFG.camOffsetY;
+
+    stepsClimbed = 0;
+    scoreStepsEl.textContent = stepsClimbed;
+
+    resetStepTimer();
+    updateTimerUI();
+  }
+
+  function goMenu() {
+    mode = Mode.MENU;
+    gameOverOverlay.classList.remove("show");
+    startOverlay.classList.add("show");
+    updateTimerUI();
+  }
+
+  function startGame() {
+    mode = Mode.PLAY;
+    startOverlay.classList.remove("show");
+    gameOverOverlay.classList.remove("show");
+    resetWorldForPlay();
+  }
+
+  function retryGame() {
+    if (mode === Mode.OVER || mode === Mode.PLAY) {
+      mode = Mode.PLAY;
+      gameOverOverlay.classList.remove("show");
+      resetWorldForPlay();
+    }
+  }
+
+  // ==========
+  // 入力（長押しで進まない：押下1回＝1段 / e.repeatは無視）
+  // ==========
+  addEventListener("keydown", (e) => {
+    if (e.repeat) return;
+
+    const left  = (e.code === "KeyA" || e.code === "ArrowLeft");
+    const right = (e.code === "KeyD" || e.code === "ArrowRight");
+
+    if (left || right) e.preventDefault();
+
+    if (left)  { lastKey = "A"; if (mode === Mode.PLAY) attemptClimb("A"); }
+    if (right) { lastKey = "D"; if (mode === Mode.PLAY) attemptClimb("D"); }
+
+    if (e.code === "KeyR") {
+      if (mode !== Mode.MENU) retryGame();
+    }
+  }, { passive:false });
+
+  // keyupは使わないが、矢印の既定動作抑止のためだけ残す（環境によっては効く）
+  addEventListener("keyup", (e) => {
+    const left  = (e.code === "KeyA" || e.code === "ArrowLeft");
+    const right = (e.code === "KeyD" || e.code === "ArrowRight");
+    if (left || right) e.preventDefault();
+  }, { passive:false });
+
+  // モバイル：長押ししても1回しか進まない（pointerdownで1回だけ attemptClimb）
+  const btnA = document.getElementById("btnA");
+  const btnD = document.getElementById("btnD");
+  function bindTap(btn, keyName){
+    const onDown = (ev)=>{
+      ev.preventDefault();
+      lastKey = keyName;
+      if (mode === Mode.PLAY) attemptClimb(keyName);
+    };
+    btn.addEventListener("pointerdown", onDown);
+  }
+  bindTap(btnA,"A");
+  bindTap(btnD,"D");
+
+  startBtn.addEventListener("click", startGame);
+  retryBtn.addEventListener("click", retryGame);
+  backBtn.addEventListener("click", goMenu);
+
+  resetHiBtn.addEventListener("click", () => {
+    localStorage.removeItem(CFG.hiKey);
+    loadHi();
+  });
+
+  // ==========
+  // 描画補助
+  // ==========
+  function worldToScreen(wx, wy){
+    const cx = innerWidth*0.5;
+    const cy = innerHeight*0.5;
+    const sx = cx + (wx - camera.x);
+    const sy = cy - (wy - camera.y); // 上が+
+    return { x:sx, y:sy };
+  }
+  function roundRect(ctx, x, y, w, h, r){
+    const rr = Math.min(r, w/2, h/2);
+    ctx.beginPath();
+    ctx.moveTo(x+rr, y);
+    ctx.arcTo(x+w, y, x+w, y+h, rr);
+    ctx.arcTo(x+w, y+h, x, y+h, rr);
+    ctx.arcTo(x, y+h, x, y, rr);
+    ctx.arcTo(x, y, x+w, y, rr);
+    ctx.closePath();
+  }
+  if (!CanvasRenderingContext2D.prototype.roundRect) {
+    CanvasRenderingContext2D.prototype.roundRect = function(x,y,w,h,r){ roundRect(this,x,y,w,h,r); return this; };
+  }
+
+  function getTimerColor(ratio){
+    if (ratio > 0.55) return css("--barOk");
+    if (ratio > 0.25) return css("--barWarn");
+    return css("--barBad");
+  }
+
+  // ==========
+  // 更新・描画
+  // ==========
+  let lastT = performance.now();
+
+  function update(dt){
+    if (mode === Mode.MENU) {
+      return;
+    }
+
+    // 移動補間
+    if (player.moving) {
+      const t = (performance.now() - player.t0) / CFG.moveTweenMs;
+      const k = Math.min(1, Math.max(0, t));
+      const e = 1 - Math.pow(1 - k, 3);
+      player.x = player.fromX + (player.toX - player.fromX) * e;
+      player.y = player.fromY + (player.toY - player.fromY) * e;
+      if (k >= 1) player.moving = false;
+    }
+
+    // 落下
+    if (player.falling) {
+      player.vy -= CFG.fallGravity * dt;
+      player.x += player.vx * dt;
+      player.y += player.vy * dt;
+    }
+
+    // プレイ中：タイマー減少（移動アニメ中は減らさない）
+    if (mode === Mode.PLAY && !player.falling && !player.moving) {
+      stepTimeLeftMs -= dt * 1000;
+      if (stepTimeLeftMs <= 0) {
+        stepTimeLeftMs = 0;
+        triggerGameOver("時間切れ（次の段に間に合いませんでした）");
+      }
+    }
+    updateTimerUI();
+
+    ensureStepsAhead();
+    cleanupSteps();
+
+    // カメラ追従
+    const targetX = player.x;
+    const targetY = player.y + CFG.camOffsetY;
+    camera.x += (targetX - camera.x) * CFG.camSmooth;
+    camera.y += (targetY - camera.y) * CFG.camSmooth;
+  }
+
+  function draw(){
+    ctx.clearRect(0,0,innerWidth,innerHeight);
+
+    // 薄いグリッド
+    ctx.save();
+    ctx.globalAlpha = 0.08;
+    ctx.strokeStyle = "#cfe0ff";
+    ctx.lineWidth = 1;
+    const grid=64;
+    for (let x = (-(camera.x|0) % grid) - grid; x < innerWidth + grid; x += grid){
+      ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x,innerHeight); ctx.stroke();
+    }
+    for (let y = ((camera.y|0) % grid) - grid; y < innerHeight + grid; y += grid){
+      ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(innerWidth,y); ctx.stroke();
+    }
+    ctx.restore();
+
+    // 階段
+    for (let i=0;i<steps.length;i++){
+      const s=steps[i];
+      const p=worldToScreen(s.x,s.y);
+      if (p.y > innerHeight + 220 || p.y < -220) continue;
+
+      const isCur = (i===player.idx);
+      const isNext = (i===player.idx+1);
+
+      ctx.fillStyle = isCur ? "rgba(122,162,255,0.35)"
+                   : isNext ? "rgba(255,255,255,0.10)"
+                   : (s.alt ? css("--step") : css("--step2"));
+
+      const w=s.w, h=s.h;
+      ctx.fillRect(p.x, p.y - h, w, h);
+      ctx.strokeStyle = css("--edge");
+      ctx.lineWidth = 1;
+      ctx.strokeRect(p.x + 0.5, p.y - h + 0.5, w - 1, h - 1);
+    }
+
+    // プレイヤー
+    const pp = worldToScreen(player.x, player.y);
+    ctx.save();
+    ctx.translate(pp.x, pp.y);
+
+    // 影
+    ctx.globalAlpha = 0.22;
+    ctx.fillStyle = "#000";
+    ctx.beginPath();
+    ctx.ellipse(0, 18, 18, 7, 0, 0, Math.PI*2);
+    ctx.fill();
+
+    // 本体
+    ctx.globalAlpha = 1;
+    ctx.fillStyle = "#eaf0ff";
+    ctx.strokeStyle = "rgba(0,0,0,0.25)";
+    ctx.lineWidth = 2;
+
+    ctx.beginPath();
+    ctx.roundRect(-14, -34, 28, 44, 10);
+    ctx.fill();
+    ctx.stroke();
+
+    // 目（向き）
+    const facing = (lastKey === "A") ? -1 : +1;
+    ctx.fillStyle = "#0b1020";
+    ctx.beginPath();
+    ctx.arc(5*facing, -18, 3, 0, Math.PI*2);
+    ctx.fill();
+
+    if (player.falling) {
+      ctx.fillStyle = "rgba(255,92,122,0.95)";
+      ctx.font = "900 12px ui-sans-serif, system-ui";
+      ctx.fillText("!", -3, -42);
+    }
+    ctx.restore();
+
+    // ===== 制限時間ゲージ：プレイヤーの上に描画 =====
+    // 見やすさのため、画面座標で固定サイズのバーを描画
+    if (mode !== Mode.MENU && !player.falling) {
+      const ratio = stepTimeRatio;
+      const barW = 92;
+      const barH = 10;
+      const x = pp.x - barW/2;
+
+      // 「上」に表示（頭より少し上）。画面上端からはみ出しにくいようにクランプ。
+      const y = Math.max(10, pp.y - 70);
+
+      ctx.save();
+      ctx.globalAlpha = 0.95;
+
+      // 背景
+      ctx.fillStyle = css("--barBg");
+      ctx.strokeStyle = "rgba(255,255,255,0.14)";
+      ctx.lineWidth = 1;
+
+      roundRect(ctx, x, y, barW, barH, 999);
+      ctx.fill();
+      ctx.stroke();
+
+      // 進捗
+      const fillW = Math.max(0, (barW - 2) * ratio);
+      ctx.fillStyle = getTimerColor(ratio);
+      roundRect(ctx, x+1, y+1, fillW, barH-2, 999);
+      ctx.fill();
+
+      ctx.restore();
+    }
+
+
+    // 次に押すべき方向ヒント（プレイ時のみ）
+    if (mode === Mode.PLAY && !player.falling) {
+      const expect = expectedDirForNextStep();
+      if (expect !== null) {
+        ctx.save();
+        ctx.globalAlpha = 0.86;
+        ctx.fillStyle = "rgba(10,18,35,0.65)";
+        ctx.strokeStyle = "rgba(255,255,255,0.14)";
+        ctx.lineWidth = 1;
+
+        const hint = expect===+1 ? "次：D / →（右上）" : "次：A / ←（左上）";
+        ctx.font = "900 13px ui-sans-serif, system-ui";
+        const padX=10;
+        const tw = ctx.measureText(hint).width;
+        const boxW = tw + padX*2;
+        const boxH = 32;
+        const x = innerWidth - boxW - 16;
+        const y = 16;
+
+        roundRect(ctx, x, y, boxW, boxH, 12);
+        ctx.fill(); ctx.stroke();
+
+        ctx.fillStyle = "#eaf0ff";
+        ctx.fillText(hint, x+padX, y+21);
+        ctx.restore();
+      }
+    }
+  }
+
+  function loop(){
+    const now = performance.now();
+    const dt = Math.min(0.033, Math.max(0.001, (now - lastT)/1000));
+    lastT = now;
+
+    update(dt);
+    draw();
+    requestAnimationFrame(loop);
+  }
+
+  // ==========
+  // 起動
+  // ==========
+  loadHi();
+
+  // メニュー表示のまま、ワールドだけ初期化（見た目用）
+  resetWorldForPlay();
+  mode = Mode.MENU;
+  startOverlay.classList.add("show");
+  gameOverOverlay.classList.remove("show");
+
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>
